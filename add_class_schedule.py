@@ -116,7 +116,107 @@ def _create_events_list(title, location, time_str, dates_str, notes, current_yea
         created.append(event)
     return created
 
+def parse_weekly_schedule(text):
+    events = []
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    period_match = re.search(r'Period:\s*([A-Za-z]+\s+\d{1,2},\s*\d{4})\s*to\s*([A-Za-z]+\s+\d{1,2},\s*\d{4})', text)
+    if not period_match:
+        return events
+        
+    start_date_str = period_match.group(1)
+    end_date_str = period_match.group(2)
+    
+    start_date = datetime.datetime.strptime(start_date_str, "%b %d, %Y").date()
+    end_date = datetime.datetime.strptime(end_date_str, "%b %d, %Y").date()
+    
+    day_map = {
+        'monday': 0, 'mondays': 0,
+        'tuesday': 1, 'tuesdays': 1,
+        'wednesday': 2, 'wednesdays': 2,
+        'thursday': 3, 'thursdays': 3,
+        'friday': 4, 'fridays': 4,
+        'saturday': 5, 'saturdays': 5,
+        'sunday': 6, 'sundays': 6
+    }
+    
+    for line in lines:
+        if line.startswith("Period:"): continue
+        
+        # fix common typos
+        line = line.replace('69m', '6pm')
+        
+        parts = line.split(',', 1)
+        if len(parts) < 2: continue
+        
+        time_part = parts[0].strip()
+        event_part = parts[1].strip()
+        
+        if event_part.lower().startswith('event:'):
+            event_title = event_part[6:].strip()
+        else:
+            event_title = event_part
+            
+        day_str = time_part.split(' ')[0].lower()
+        if day_str not in day_map:
+            continue
+            
+        target_weekday = day_map[day_str]
+        
+        time_match = re.search(r'(\d{1,2}(?::\d{2})?)\s*(am|pm)?\s*-\s*(\d{1,2}(?::\d{2})?)\s*(am|pm)?', time_part, re.IGNORECASE)
+        start_time = None
+        end_time = None
+        if time_match:
+            t1, p1, t2, p2 = time_match.groups()
+            if not p1 and p2: p1 = p2
+            if not p2 and p1: p2 = p1
+            if not p1: p1 = 'am'
+            if not p2: p2 = 'am'
+            
+            def to_time(t, p):
+                if ':' not in t: t += ':00'
+                if p.lower() == 'pm' and not t.startswith('12'):
+                    h, m = t.split(':')
+                    t = f"{int(h)+12}:{m}"
+                elif p.lower() == 'am' and t.startswith('12'):
+                    h, m = t.split(':')
+                    t = f"00:{m}"
+                return datetime.datetime.strptime(t, "%H:%M").time()
+                
+            try:
+                start_time = to_time(t1, p1)
+                end_time = to_time(t2, p2)
+            except Exception as e:
+                pass
+                
+        curr = start_date
+        while curr.weekday() != target_weekday:
+            curr += datetime.timedelta(days=1)
+            
+        while curr <= end_date:
+            event = {
+                'title': event_title,
+                'location': '',
+                'notes': '',
+                'is_all_day': start_time is None,
+                'is_yearly': False
+            }
+            if start_time:
+                event['start'] = datetime.datetime.combine(curr, start_time)
+                event['end'] = datetime.datetime.combine(curr, end_time)
+            else:
+                event['start_date'] = curr
+                event['end_date'] = curr + datetime.timedelta(days=1)
+                
+            events.append(event)
+            curr += datetime.timedelta(days=7)
+            
+    return events
+
 def parse_schedule(text):
+    if text.strip().startswith("Period:"):
+        return parse_weekly_schedule(text)
+        
     events = []
     blocks = re.split(r'\n\s*\n', text.strip())
     current_year = datetime.datetime.now().year
@@ -222,8 +322,8 @@ def generate_ics(events, filename):
                 uid = hashlib.md5(uid_str.encode('utf-8')).hexdigest() + "@local.calendar"
                 f.write(f"UID:{uid}\n")
                 f.write(f"SUMMARY:{e['title']}\n")
-                f.write(f"DTSTART:{e['start'].strftime('%Y%m%d%T%H%M%S').replace('T', 'T')}\n")
-                f.write(f"DTEND:{e['end'].strftime('%Y%m%d%T%H%M%S').replace('T', 'T')}\n")
+                f.write(f"DTSTART:{e['start'].strftime('%Y%m%dT%H%M%S')}\n")
+                f.write(f"DTEND:{e['end'].strftime('%Y%m%dT%H%M%S')}\n")
                 
             if e.get('is_yearly'):
                 f.write("RRULE:FREQ=YEARLY\n")
