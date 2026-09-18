@@ -42,6 +42,48 @@ Used for adding simple lists of dates, times, and classes. (用于批量添加�
    ```
 *(Note: This script prevents duplicates! If run again on the same text, it updates existing events instead of creating copies. / 此脚本具备防重复功能！多次运行会自动更新而不会重复创建。)*
 
+#### Text Format / 文本格式
+
+One event = one block. **The first line is the title**; the lines below it are optional attributes. Blank lines separate events.
+（一个事件 = 一个块。**第一行就是标题**，下面几行是可选属性。事件之间用空行分隔。）
+
+```
+October Goal Setting Conferences with Ms. Ogawa
+Date: Oct 5, 2026
+Time: 2:55pm - 3:15pm
+Location: Montclaire Elementary School, Room 16
+Notes: Bring the goal sheet
+```
+
+| Line / 行 | Labels / 标签 | Examples / 示例 |
+| --- | --- | --- |
+| Title / 标题 | none, or `Topic:` `Title:` `Subject:` `Event:` `主题:` `标题:` `事件:` | first line of the block / 块的第一行 |
+| Date / 日期 | `Date:` `Dates:` `日期:` `📅` | `Oct 5, 2026` · `Nov. 21, 28; Dec. 5` · `2026年10月5日` · `10/5` |
+| Time / 时间 | `Time:` `时间:` `🕥` | `2:55pm - 3:15pm` · `14:00-15:00` |
+| Location / 地点 | `Location:` `地点:` `📍` | `Room 16` |
+| Notes / 备注 | `Notes:` `备注:` `📝` | unlabelled extra lines land here too / 没有标签的多余行也会进备注 |
+
+**Good to know / 小贴士:**
+- No `Time:` line → an all-day event. / 没有时间行就是全天事件。
+- One `Date:` line can create several events: `Date: Nov. 21, 28; Dec. 5` → 3 events. / 一行日期可以生成多个事件。
+- The date may also sit on the `Time:` line: `Time: Monday Oct 5, 2026; 2:55pm - 3:15pm`. / 日期也可以直接写在时间行里。
+- `–` and `—` work as well as `-`, so pasting straight from email or Google Calendar is fine. / 从邮件或 Google Calendar 直接粘贴的破折号也能识别。
+- Times are floating local time. Timezone text like `(Pacific Time - Los Angeles)` is ignored, not converted. / 生成的是无时区的本地时间，`(Pacific Time)` 这类文字会被忽略，不做换算。
+- A title containing 生日 / 纪念日 / birthday / anniversary repeats every year. / 标题含这些词会自动设为每年重复。
+- Edited the text and re-running changes nothing in Calendar? It does now — each run bumps `SEQUENCE`, which is how a client is told "same event, newer version". Without it Calendar silently ignores a UID it already holds. / 改完文本重跑却没反应？现在每次生成都会递增 `SEQUENCE`，告诉日历“同一事件的新版本”；没有它时日历会直接忽略已存在的 UID。
+- Apple Calendar geocodes the `Location:` text. If it matches a real place, it shows that place's own name and drops any extra words, so put a room or suite number in `Notes:` instead. / Apple Calendar 会对地点做地理编码，匹配到真实地点后会用官方名称替换原文，多余文字会被丢掉 —— 房间号请写在备注里。
+
+#### Weekly Recurring Format / 周期性排课格式
+
+If the text starts with `Period:`, each following line is a weekday rule repeated across the whole range. Note the comma between the time and the event name.
+（如果文本以 `Period:` 开头，后面每行都是一条按周重复的规则，覆盖整个日期区间。注意时间和事件名之间要用逗号分隔。）
+
+```
+Period: Sep 1, 2026 to Dec 18, 2026
+Monday 3pm-4pm, Event: Soccer
+Wednesday 5-6pm, Chess Club
+```
+
 ### 2. Add Travel Itinerary from Excel / 从 Excel 表格导入旅行计划
 Parses multi-tab Google Spreadsheets (downloaded as `.xlsx`) and automatically bundles flight, lodging, and notes into the Calendar event's description field.
 (解析多 Tab 的旅行表格，自动将航班、住宿和备注信息打包进日历的“备注”中。)

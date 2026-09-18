@@ -5,6 +5,29 @@ import subprocess
 import hashlib
 import os
 
+_DASH_CHARS = '–—−‒―'
+
+ATTR_LINE_RE = re.compile(r'(?i)^\s*(?:(?:location|地点|time|时间|dates?|日期|notes?|备注)[:：]|[📍🕥📅📝][:：]?)')
+TITLE_LABEL_RE = re.compile(r'(?i)^\s*(?:topic|title|subject|event|主题|标题|事件)[:：]\s*')
+
+def _normalize_dashes(s):
+    for ch in _DASH_CHARS:
+        s = s.replace(ch, '-')
+    return s
+
+def _merge_attribute_blocks(text):
+    # Blank lines separate events, but an attribute line always belongs to the
+    # block above it, so let people leave blank lines between a title and its
+    # "Time:" / "Location:" lines.
+    out = []
+    for line in text.split('\n'):
+        if line.strip() and ATTR_LINE_RE.match(line):
+            while out and not out[-1].strip():
+                out.pop()
+        out.append(line)
+    return '\n'.join(out)
+
+
 def extract_dates(dates_str, current_year):
     dates = []
     
@@ -66,7 +89,7 @@ def extract_dates(dates_str, current_year):
     return dates
 
 def extract_times(time_str):
-    time_str = time_str.upper().replace('.', '')
+    time_str = _normalize_dashes(time_str).upper().replace('.', '')
     m = re.search(r'(\d{1,2}:\d{2})\s*(AM|PM)?\s*[-~至]\s*(\d{1,2}:\d{2})\s*(AM|PM)?', time_str)
     if m:
         t1, p1, t2, p2 = m.groups()
@@ -149,7 +172,7 @@ def parse_weekly_schedule(text):
         parts = line.split(',', 1)
         if len(parts) < 2: continue
         
-        time_part = parts[0].strip()
+        time_part = _normalize_dashes(parts[0].strip())
         event_part = parts[1].strip()
         
         if event_part.lower().startswith('event:'):
@@ -218,17 +241,21 @@ def parse_schedule(text):
         return parse_weekly_schedule(text)
         
     events = []
-    blocks = re.split(r'\n\s*\n', text.strip())
+    blocks = re.split(r'\n\s*\n', _merge_attribute_blocks(text).strip())
     current_year = datetime.datetime.now().year
     
     for block in blocks:
         lines = [line for line in block.strip().split('\n') if line.strip()]
         if not lines: continue
+
+        labelled_title = TITLE_LABEL_RE.sub('', lines[0]).strip()
+        if labelled_title:
+            lines[0] = labelled_title
         
         has_attrs = False
         if len(lines) > 1:
             for line in lines[1:]:
-                if re.search(r'(?i)^(?:location|地点|📍|time|时间|🕥|dates?|日期|📅|notes?|备注|📝)[:：]', line.strip()):
+                if ATTR_LINE_RE.match(line):
                     has_attrs = True
                     break
         
@@ -285,6 +312,10 @@ def parse_schedule(text):
                 else:
                     notes_str += line.strip() + "\n"
                     
+            # A "Time:" line often carries the date too: "Mon Oct 5, 2026; 2:55pm - 3:15pm"
+            if not dates_str and time_str and extract_dates(time_str, current_year):
+                dates_str = time_str
+
             if not dates_str:
                 if ":" in title or "：" in title:
                     parts = re.split(r'[:：]', title, maxsplit=1)
@@ -303,7 +334,25 @@ def parse_schedule(text):
                     
     return events
 
+def _ics_escape(value):
+    # RFC 5545 TEXT values: backslash, semicolon and comma must be escaped, and
+    # line breaks become a literal \n. An unescaped comma in LOCATION makes
+    # strict parsers treat the rest of the line as a second value.
+    return (str(value).replace('\\', '\\\\')
+                      .replace(';', '\\;')
+                      .replace(',', '\\,')
+                      .replace('\r\n', '\\n')
+                      .replace('\n', '\\n')
+                      .replace('\r', '\\n'))
+
 def generate_ics(events, filename):
+    # UIDs are derived from title + start, so re-running after editing only the
+    # location or notes keeps the same UID. Calendar clients ignore a repeat of
+    # a UID they already hold unless SEQUENCE says it is a newer revision.
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    stamp = now_utc.strftime('%Y%m%dT%H%M%SZ')
+    sequence = int((now_utc - datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)).total_seconds() // 60)
+
     with open(filename, 'w', encoding='utf-8') as f:
         f.write("BEGIN:VCALENDAR\n")
         f.write("VERSION:2.0\n")
@@ -314,14 +363,14 @@ def generate_ics(events, filename):
                 uid_str = f"{e['title']}_{e['start_date'].isoformat()}"
                 uid = hashlib.md5(uid_str.encode('utf-8')).hexdigest() + "@local.calendar"
                 f.write(f"UID:{uid}\n")
-                f.write(f"SUMMARY:{e['title']}\n")
+                f.write(f"SUMMARY:{_ics_escape(e['title'])}\n")
                 f.write(f"DTSTART;VALUE=DATE:{e['start_date'].strftime('%Y%m%d')}\n")
                 f.write(f"DTEND;VALUE=DATE:{e['end_date'].strftime('%Y%m%d')}\n")
             else:
                 uid_str = f"{e['title']}_{e['start'].isoformat()}"
                 uid = hashlib.md5(uid_str.encode('utf-8')).hexdigest() + "@local.calendar"
                 f.write(f"UID:{uid}\n")
-                f.write(f"SUMMARY:{e['title']}\n")
+                f.write(f"SUMMARY:{_ics_escape(e['title'])}\n")
                 f.write(f"DTSTART:{e['start'].strftime('%Y%m%dT%H%M%S')}\n")
                 f.write(f"DTEND:{e['end'].strftime('%Y%m%dT%H%M%S')}\n")
                 
@@ -329,12 +378,15 @@ def generate_ics(events, filename):
                 f.write("RRULE:FREQ=YEARLY\n")
                 
             if e.get('location'):
-                f.write(f"LOCATION:{e['location']}\n")
+                f.write(f"LOCATION:{_ics_escape(e['location'])}\n")
                 
             if e.get('notes'):
-                encoded_notes = e['notes'].strip().replace('\n', '\\n')
+                encoded_notes = _ics_escape(e['notes'].strip())
                 f.write(f"DESCRIPTION:{encoded_notes}\n")
                 
+            f.write(f"DTSTAMP:{stamp}\n")
+            f.write(f"LAST-MODIFIED:{stamp}\n")
+            f.write(f"SEQUENCE:{sequence}\n")
             f.write("END:VEVENT\n")
         f.write("END:VCALENDAR\n")
 
@@ -346,6 +398,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Parse class schedule text and generate .ics file")
     parser.add_argument("input_file", help="Text file containing the schedule")
     parser.add_argument("--out", default=default_ics, help="Output .ics file name")
+    parser.add_argument("--no-open", action="store_true", help="Write the .ics without opening it in Calendar")
     
     args = parser.parse_args()
     
@@ -364,5 +417,5 @@ if __name__ == "__main__":
     generate_ics(events, args.out)
     print(f"Generated {args.out} with {len(events)} events.")
     
-    if sys.platform == 'darwin':
+    if sys.platform == 'darwin' and not args.no_open:
         subprocess.run(['open', args.out])
