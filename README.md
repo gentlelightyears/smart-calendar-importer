@@ -34,8 +34,8 @@ If you prefer using the command line, the raw Python scripts are completely at y
 Used for adding simple lists of dates, times, and classes. (用于批量添加简单的日期、时间和课程列表文本。)
 
 **Usage / 用法:**
-1. Put your schedule text inside `schedule_input.txt` (recommend clearing old content first).
-   (把排期文本粘贴到 `schedule_input.txt` 中。)
+1. Copy `schedule_input.example.txt` to `schedule_input.txt` and replace its contents with your own schedule. `schedule_input.txt` is gitignored, so your real dates and places stay out of this public repo.
+   (把 `schedule_input.example.txt` 复制为 `schedule_input.txt`，再换成你自己的日程。该文件已被 gitignore，你的真实日程不会进入这个公开仓库。)
 2. Run in Terminal / 在终端中运行:
    ```bash
    python3 ~/Projects/calendar_events/add_class_schedule.py ~/Projects/calendar_events/schedule_input.txt
